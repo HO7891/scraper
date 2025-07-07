@@ -26,9 +26,24 @@ SELECTORS = {
 }
 
 # log_print: 依 log_enable 參數決定是否輸出訊息
+# === LOG 設定區 ===
+LOG_TO_FILE = True    # True=寫入本地log, False=只顯示於CMD
+LOG_FILENAME = "bizbat_log.txt"  # log檔名，預設與py同目錄
+
+import os
+LOGFILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOG_FILENAME)
+
+# log_print: 依 log_enable 參數決定是否輸出訊息，並根據 LOG_TO_FILE 控制是否寫入本地檔
+
 def log_print(msg, log_enable):
     if log_enable:
         print(msg)
+    if LOG_TO_FILE:
+        try:
+            with open(LOGFILE_PATH, 'a', encoding='utf-8') as f:
+                f.write(msg + '\n')
+        except Exception as e:
+            print(f"[ERROR] 寫入 log 檔失敗: {e}")
 
 def fix_cmd_encoding():
     try:
@@ -36,7 +51,7 @@ def fix_cmd_encoding():
     except Exception:
         pass
 
-def read_company_list(input_file, log_enable=False):
+def read_company_list(input_file, log_enable=False, logfile_path=None):
     if not os.path.exists(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
         return []
@@ -45,7 +60,7 @@ def read_company_list(input_file, log_enable=False):
     log_print(f"[INFO] 讀取公司列表完成，共 {len(company_list)} 筆", log_enable)
     return company_list
 
-def save_results(data, log_enable=False):
+def save_results(data, log_enable=False, logfile_path=None):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = os.path.join(OUTPUT_DIR, f"biz_company_info_{timestamp}")
@@ -58,7 +73,7 @@ def save_results(data, log_enable=False):
             writer.writerows(data)
     log_print(f"[SUCCESS] Data saved to {base}.json & {base}.csv", log_enable)
 
-async def scrape_company_info(query_name, page, log_enable=False):
+async def scrape_company_info(query_name, page, log_enable=False, logfile_path=None):
     await page.goto(BASE_URL)
     try:
         await page.fill(SELECTORS["search_input"], query_name)
@@ -69,24 +84,8 @@ async def scrape_company_info(query_name, page, log_enable=False):
         if count == 0:
             log_print(f"[WARNING] No result for '{query_name}'", log_enable)
             return None
-        await asyncio.sleep(2)  # 點擊搜尋結果前等待2秒（配合查詢速度限制）
-        # 多結果選擇：遍歷 #vParagraph > div，抓 div:nth-child(2) 內容
-        v_divs = page.locator('#vParagraph > div')
-        chosen_idx = 0
-        for i in range(await v_divs.count()):
-            status_div = v_divs.nth(i).locator('div:nth-child(2)')
-            try:
-                status_text = await status_div.inner_text()
-                if "核准設立" in status_text:
-                    chosen_idx = i
-                    break
-            except Exception:
-                continue
-        if chosen_idx != 0:
-            log_print(f"[INFO] 多筆結果，選擇第 {chosen_idx+1} 筆（含核准設立）", log_enable)
-        # 點擊該 div 下的 .panel-heading > a
-        link = v_divs.nth(chosen_idx).locator('div.panel-heading > a')
-        await link.click()
+        await asyncio.sleep(2)  # 點擊首筆搜尋結果前等待2秒（配合查詢速度限制）
+        await result_links.nth(0).click()
         await page.wait_for_load_state('networkidle', timeout=10000)
         log_print(f"[INFO] 完成查詢：{query_name}", log_enable)
         async def safe_inner_text(selector_key, field_name):
@@ -112,8 +111,10 @@ async def scrape_company_info(query_name, page, log_enable=False):
 async def main():
     parser = argparse.ArgumentParser(description="Bizbat Scraper")
     parser.add_argument('--log', action='store_true', help='顯示進度log')
+    parser.add_argument('--logfile', type=str, default=None, help='log 檔案路徑，預設不寫入')
     args = parser.parse_args()
     log_enable = args.log
+    logfile_path = args.logfile
 
     fix_cmd_encoding()
     company_names = read_company_list(COMPANY_LIST_FILE, log_enable)
@@ -125,13 +126,32 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        for idx, name in enumerate(company_names, 1):
-            log_print(f"[INFO] 處理第 {idx}/{len(company_names)} 筆：{name}", log_enable)
-            info = await scrape_company_info(name, page, log_enable)
-            if info:
-                results.append(info)
-        await browser.close()
+        try:
+            for idx, name in enumerate(company_names, 1):
+                log_print(f"[INFO] 處理第 {idx}/{len(company_names)} 筆：{name}", log_enable)
+                info = await scrape_company_info(name, page, log_enable, logfile_path)
+                if info:
+                    results.append(info)
+        except Exception as e:
+            print(f"[FATAL] 發生例外中斷：{e}")
+            # 儲存目前已抓到的資料
+            save_results(results, log_enable)
+            # 截圖
+            try:
+                os.makedirs(OUTPUT_DIR, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                shot_path = os.path.join(OUTPUT_DIR, f"exception_{ts}.png")
+                await page.screenshot(path=shot_path)
+                print(f"[INFO] 已截圖於 {shot_path}")
+                if logfile_path:
+                    with open(logfile_path, 'a', encoding='utf-8') as f:
+                        f.write(f"[FATAL] 發生例外中斷：{e}\n[INFO] 已截圖於 {shot_path}\n")
+            except Exception as se:
+                print(f"[ERROR] 截圖失敗: {se}")
+        finally:
+            await browser.close()
     save_results(results, log_enable)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
