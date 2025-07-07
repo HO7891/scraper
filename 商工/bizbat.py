@@ -25,17 +25,15 @@ SELECTORS = {
     "company_address": "#tabCmpyContent > div > table > tbody > tr:nth-child(11) > td:nth-child(2)",
 }
 
-# log_print: 依 log_enable 參數決定是否輸出訊息
 # === LOG 設定區 ===
-LOG_TO_FILE = True    # True=寫入本地log, False=只顯示於CMD
+LOG_TO_FILE = True    # True=寫入本地log, False=只顯示於CMD（可於此一鍵切換）
 LOG_FILENAME = "bizbat_log.txt"  # log檔名，預設與py同目錄
-
 import os
 LOGFILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOG_FILENAME)
 
-# log_print: 依 log_enable 參數決定是否輸出訊息，並根據 LOG_TO_FILE 控制是否寫入本地檔
+# log_print: 預設CMD顯示，log_to_file控制是否寫入本地檔
 
-def log_print(msg, log_enable):
+def log_print(msg, log_enable=True):
     if log_enable:
         print(msg)
     if LOG_TO_FILE:
@@ -109,12 +107,8 @@ async def scrape_company_info(query_name, page, log_enable=False, logfile_path=N
         return None
 
 async def main():
-    parser = argparse.ArgumentParser(description="Bizbat Scraper")
-    parser.add_argument('--log', action='store_true', help='顯示進度log')
-    parser.add_argument('--logfile', type=str, default=None, help='log 檔案路徑，預設不寫入')
-    args = parser.parse_args()
-    log_enable = args.log
-    logfile_path = args.logfile
+    # log_enable 預設為 True，CMD print 永遠開啟
+    log_enable = True
 
     fix_cmd_encoding()
     company_names = read_company_list(COMPANY_LIST_FILE, log_enable)
@@ -129,7 +123,7 @@ async def main():
         try:
             for idx, name in enumerate(company_names, 1):
                 log_print(f"[INFO] 處理第 {idx}/{len(company_names)} 筆：{name}", log_enable)
-                info = await scrape_company_info(name, page, log_enable, logfile_path)
+                info = await scrape_company_info(name, page, log_enable)
                 if info:
                     results.append(info)
         except Exception as e:
@@ -143,8 +137,8 @@ async def main():
                 shot_path = os.path.join(OUTPUT_DIR, f"exception_{ts}.png")
                 await page.screenshot(path=shot_path)
                 print(f"[INFO] 已截圖於 {shot_path}")
-                if logfile_path:
-                    with open(logfile_path, 'a', encoding='utf-8') as f:
+                if LOG_TO_FILE:
+                    with open(LOGFILE_PATH, 'a', encoding='utf-8') as f:
                         f.write(f"[FATAL] 發生例外中斷：{e}\n[INFO] 已截圖於 {shot_path}\n")
             except Exception as se:
                 print(f"[ERROR] 截圖失敗: {se}")
