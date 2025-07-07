@@ -56,11 +56,13 @@ async def scrape_company_info(query_name, page):
         await page.fill(SELECTORS["search_input"], query_name)
         await page.click(SELECTORS["search_button"])
         await page.wait_for_load_state('networkidle', timeout=10000)
-        result_link = page.locator(SELECTORS["first_result_link"])
-        if not await result_link.is_visible():
+        result_links = page.locator(SELECTORS["first_result_link"])
+        count = await result_links.count()
+        if count == 0:
             print(f"[WARNING] No result for '{query_name}'")
             return None
-        await result_link.click()
+        await asyncio.sleep(2)  # 點擊首筆搜尋結果前等待2秒（配合查詢速度限制）
+        await result_links.nth(0).click()
         await page.wait_for_load_state('networkidle', timeout=10000)
         return {
             "查詢公司名稱": query_name,
