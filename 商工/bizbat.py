@@ -69,8 +69,24 @@ async def scrape_company_info(query_name, page, log_enable=False):
         if count == 0:
             log_print(f"[WARNING] No result for '{query_name}'", log_enable)
             return None
-        await asyncio.sleep(2)  # 點擊首筆搜尋結果前等待2秒（配合查詢速度限制）
-        await result_links.nth(0).click()
+        await asyncio.sleep(2)  # 點擊搜尋結果前等待2秒（配合查詢速度限制）
+        # 多結果選擇：遍歷 #vParagraph > div，抓 div:nth-child(2) 內容
+        v_divs = page.locator('#vParagraph > div')
+        chosen_idx = 0
+        for i in range(await v_divs.count()):
+            status_div = v_divs.nth(i).locator('div:nth-child(2)')
+            try:
+                status_text = await status_div.inner_text()
+                if "核准設立" in status_text:
+                    chosen_idx = i
+                    break
+            except Exception:
+                continue
+        if chosen_idx != 0:
+            log_print(f"[INFO] 多筆結果，選擇第 {chosen_idx+1} 筆（含核准設立）", log_enable)
+        # 點擊該 div 下的 .panel-heading > a
+        link = v_divs.nth(chosen_idx).locator('div.panel-heading > a')
+        await link.click()
         await page.wait_for_load_state('networkidle', timeout=10000)
         log_print(f"[INFO] 完成查詢：{query_name}", log_enable)
         async def safe_inner_text(selector_key, field_name):
