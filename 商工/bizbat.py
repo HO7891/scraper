@@ -77,13 +77,29 @@ async def scrape_company_info(query_name, page, log_enable=False, logfile_path=N
         await page.fill(SELECTORS["search_input"], query_name)
         await page.click(SELECTORS["search_button"])
         await page.wait_for_load_state('networkidle', timeout=10000)
-        result_links = page.locator(SELECTORS["first_result_link"])
-        count = await result_links.count()
+        # 取得所有搜尋結果的div
+        result_panels = page.locator("#vParagraph > div")
+        count = await result_panels.count()
         if count == 0:
             log_print(f"[WARNING] No result for '{query_name}'", log_enable)
             return None
-        await asyncio.sleep(2)  # 點擊首筆搜尋結果前等待2秒（配合查詢速度限制）
-        await result_links.nth(0).click()
+        await asyncio.sleep(2)  # 點擊搜尋結果前等待2秒（配合查詢速度限制）
+        selected_idx = None
+        for i in range(count):
+            panel = result_panels.nth(i)
+            try:
+                status_div = panel.locator("div").nth(1)  # 第2個div為狀態
+                status_text = await status_div.inner_text(timeout=2000)
+            except Exception:
+                status_text = ""
+            if "登記現況：核准設立" in status_text and selected_idx is None:
+                selected_idx = i
+        if selected_idx is None:
+            selected_idx = 0
+        # 點擊該panel下的a連結
+        target_panel = result_panels.nth(selected_idx)
+        link = target_panel.locator("div.panel-heading > a")
+        await link.click()
         await page.wait_for_load_state('networkidle', timeout=10000)
         log_print(f"[INFO] 完成查詢：{query_name}", log_enable)
         async def safe_inner_text(selector_key, field_name):
