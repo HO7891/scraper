@@ -73,14 +73,21 @@ async def scrape_company_info(query_name, page, log_enable=False):
         await result_links.nth(0).click()
         await page.wait_for_load_state('networkidle', timeout=10000)
         log_print(f"[INFO] 完成查詢：{query_name}", log_enable)
+        async def safe_inner_text(selector_key, field_name):
+            try:
+                return await page.inner_text(SELECTORS[selector_key], timeout=5000)
+            except Exception as e:
+                log_print(f"[WARNING] {query_name}: 欄位『{field_name}』查無資料 ({str(e)})", log_enable)
+                return "查無資料"
+
         return {
             "查詢公司名稱": query_name,
-            "公司名稱": await page.inner_text(SELECTORS["company_name"]),
-            "統一編號": await page.inner_text(SELECTORS["unified_business_number"]),
-            "公司狀況": await page.inner_text(SELECTORS["company_status"]),
-            "資本總額(元)": await page.inner_text(SELECTORS["capital"]),
-            "代表人姓名": await page.inner_text(SELECTORS["representative"]),
-            "公司所在地": await page.inner_text(SELECTORS["company_address"]),
+            "公司名稱": await safe_inner_text("company_name", "公司名稱"),
+            "統一編號": await safe_inner_text("unified_business_number", "統一編號"),
+            "公司狀況": await safe_inner_text("company_status", "公司狀況"),
+            "資本總額(元)": await safe_inner_text("capital", "資本總額(元)"),
+            "代表人姓名": await safe_inner_text("representative", "代表人姓名"),
+            "公司所在地": await safe_inner_text("company_address", "公司所在地"),
         }
     except Exception as e:
         print(f"[ERROR] {query_name}: {e}")
