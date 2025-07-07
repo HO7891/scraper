@@ -5,6 +5,7 @@ import csv
 import os
 from datetime import datetime
 import sys
+import argparse
 
 BASE_URL = "https://findbiz.nat.gov.tw/fts/query/QueryBar/queryInit.do"
 OUTPUT_DIR = "./output_biz"
@@ -24,20 +25,27 @@ SELECTORS = {
     "company_address": "#tabCmpyContent > div > table > tbody > tr:nth-child(11) > td:nth-child(2)",
 }
 
+# log_print: 依 log_enable 參數決定是否輸出訊息
+def log_print(msg, log_enable):
+    if log_enable:
+        print(msg)
+
 def fix_cmd_encoding():
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
 
-def read_company_list(input_file):
+def read_company_list(input_file, log_enable=False):
     if not os.path.exists(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
         return []
     with open(input_file, 'r', encoding='utf-8') as f:
-        return [line.strip() for line in f if line.strip()]
+        company_list = [line.strip() for line in f if line.strip()]
+    log_print(f"[INFO] 讀取公司列表完成，共 {len(company_list)} 筆", log_enable)
+    return company_list
 
-def save_results(data):
+def save_results(data, log_enable=False):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = os.path.join(OUTPUT_DIR, f"biz_company_info_{timestamp}")
@@ -48,9 +56,9 @@ def save_results(data):
             writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
             writer.writeheader()
             writer.writerows(data)
-    print(f"[SUCCESS] Data saved to {base}.json & {base}.csv")
+    log_print(f"[SUCCESS] Data saved to {base}.json & {base}.csv", log_enable)
 
-async def scrape_company_info(query_name, page):
+async def scrape_company_info(query_name, page, log_enable=False):
     await page.goto(BASE_URL)
     try:
         await page.fill(SELECTORS["search_input"], query_name)
@@ -59,11 +67,12 @@ async def scrape_company_info(query_name, page):
         result_links = page.locator(SELECTORS["first_result_link"])
         count = await result_links.count()
         if count == 0:
-            print(f"[WARNING] No result for '{query_name}'")
+            log_print(f"[WARNING] No result for '{query_name}'", log_enable)
             return None
         await asyncio.sleep(2)  # 點擊首筆搜尋結果前等待2秒（配合查詢速度限制）
         await result_links.nth(0).click()
         await page.wait_for_load_state('networkidle', timeout=10000)
+        log_print(f"[INFO] 完成查詢：{query_name}", log_enable)
         return {
             "查詢公司名稱": query_name,
             "公司名稱": await page.inner_text(SELECTORS["company_name"]),
@@ -78,22 +87,28 @@ async def scrape_company_info(query_name, page):
         return None
 
 async def main():
+    parser = argparse.ArgumentParser(description="Bizbat Scraper")
+    parser.add_argument('--log', action='store_true', help='顯示進度log')
+    args = parser.parse_args()
+    log_enable = args.log
+
     fix_cmd_encoding()
-    company_names = read_company_list(COMPANY_LIST_FILE)
+    company_names = read_company_list(COMPANY_LIST_FILE, log_enable)
     if not company_names:
         print("[ERROR] No companies to process. Exiting.")
         return
-    print(f"[INFO] Start scrape for {len(company_names)} companies.")
+    log_print(f"[INFO] Start scrape for {len(company_names)} companies.", log_enable)
     results = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        for name in company_names:
-            info = await scrape_company_info(name, page)
+        for idx, name in enumerate(company_names, 1):
+            log_print(f"[INFO] 處理第 {idx}/{len(company_names)} 筆：{name}", log_enable)
+            info = await scrape_company_info(name, page, log_enable)
             if info:
                 results.append(info)
         await browser.close()
-    save_results(results)
+    save_results(results, log_enable)
 
 if __name__ == "__main__":
     asyncio.run(main())
