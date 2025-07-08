@@ -11,19 +11,44 @@ BASE_URL = "https://findbiz.nat.gov.tw/fts/query/QueryBar/queryInit.do"
 OUTPUT_DIR = "./output_biz"
 COMPANY_LIST_FILE = "company_list.txt"
 CSV_HEADERS = [
-    "查詢公司名稱", "公司名稱", "統一編號", "公司狀況", "資本總額(元)", "代表人姓名", "公司所在地"
+    "查詢公司名稱", "公司名稱", "統一編號", "登記現況", "資本總額(元)", "代表人姓名", "公司所在地"
 ]
 SELECTORS = {
     "search_input": "#qryCond",
     "search_button": "#qryBtn",
     "first_result_link": "#vParagraph > div > div.panel-heading > a",
-    "company_name": "#tabCmpyContent > div > table > tbody > tr:nth-child(4) > td:nth-child(2)",
-    "unified_business_number": "#tabCmpyContent > div > table > tbody > tr:nth-child(1) > td:nth-child(2)",
-    "company_status": "#tabCmpyContent > div > table > tbody > tr:nth-child(2) > td:nth-child(2)",
-    "capital": "#tabCmpyContent > div > table > tbody > tr:nth-child(6) > td:nth-child(2)",
-    "representative": "#tabCmpyContent > div > table > tbody > tr:nth-child(10) > td:nth-child(2)",
-    "company_address": "#tabCmpyContent > div > table > tbody > tr:nth-child(11) > td:nth-child(2)",
+    # 其餘欄位將用標題自動判斷
 }
+
+FIELD_KEYWORDS = {
+    "company_name": "公司名稱",
+    "unified_business_number": "統一編號",
+    "company_status": "登記現況",
+    "capital": "資本總額",
+    "representative": "代表人",
+    "company_address": "公司所在地",
+}
+
+# 自動根據標題關鍵字抓取欄位內容
+async def extract_field_by_title(page, field_keyword):
+    trs = page.locator("#tabCmpyContent > div > table > tbody > tr")
+    count = await trs.count()
+    for i in range(count):
+        tds = trs.nth(i).locator("td")
+        td_count = await tds.count()
+        if td_count < 2:
+            continue
+        title = await tds.nth(0).inner_text()
+        if field_keyword in title:
+            value = await tds.nth(1).inner_text()
+            return value.strip()
+    return "查無資料"
+
+async def extract_all_fields(page, field_keywords):
+    result = {}
+    for key, keyword in field_keywords.items():
+        result[key] = await extract_field_by_title(page, keyword)
+    return result
 
 # === LOG 設定區 ===
 LOG_TO_FILE = True    # True=寫入本地log, False=只顯示於CMD（可於此一鍵切換）
@@ -102,22 +127,22 @@ async def scrape_company_info(query_name, page, log_enable=False, logfile_path=N
         await link.click()
         await page.wait_for_load_state('networkidle', timeout=10000)
         log_print(f"[INFO] 完成查詢：{query_name}", log_enable)
-        async def safe_inner_text(selector_key, field_name):
-            try:
-                return await page.inner_text(SELECTORS[selector_key], timeout=5000)
-            except Exception as e:
-                log_print(f"[WARNING] {query_name}: 欄位『{field_name}』查無資料 ({str(e)})", log_enable)
-                return "查無資料"
-
-        return {
-            "查詢公司名稱": query_name,
-            "公司名稱": await safe_inner_text("company_name", "公司名稱"),
-            "統一編號": await safe_inner_text("unified_business_number", "統一編號"),
-            "公司狀況": await safe_inner_text("company_status", "公司狀況"),
-            "資本總額(元)": await safe_inner_text("capital", "資本總額(元)"),
-            "代表人姓名": await safe_inner_text("representative", "代表人姓名"),
-            "公司所在地": await safe_inner_text("company_address", "公司所在地"),
+        # 自動依 tr 標題關鍵字抓取所有欄位
+        fields = await extract_all_fields(page, FIELD_KEYWORDS)
+        result = {"查詢公司名稱": query_name}
+        # 對應中文欄位名稱
+        mapping = {
+            "company_name": "公司名稱",
+            "unified_business_number": "統一編號",
+            "company_status": "登記現況",
+            "capital": "資本總額(元)",
+            "representative": "代表人姓名",
+            "company_address": "公司所在地",
         }
+        for k, v in mapping.items():
+            result[v] = fields.get(k, "查無資料")
+        return result
+
     except Exception as e:
         print(f"[ERROR] {query_name}: {e}")
         return None
