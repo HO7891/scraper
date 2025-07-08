@@ -122,9 +122,14 @@ async def scrape_company_info(query_name, page, log_enable=False, logfile_path=N
         print(f"[ERROR] {query_name}: {e}")
         return None
 
+import time  # for timing
+
 async def main():
     # log_enable 預設為 True，CMD print 永遠開啟
     log_enable = True
+
+    start_time = time.time()
+    log_print(f"[INFO] 啟動時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", log_enable)
 
     fix_cmd_encoding()
     company_names = read_company_list(COMPANY_LIST_FILE, log_enable)
@@ -146,7 +151,6 @@ async def main():
             print(f"[FATAL] 發生例外中斷：{e}")
             # 儲存目前已抓到的資料
             save_results(results, log_enable)
-            # 截圖
             try:
                 os.makedirs(OUTPUT_DIR, exist_ok=True)
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -159,6 +163,10 @@ async def main():
             except Exception as se:
                 print(f"[ERROR] 截圖失敗: {se}")
         finally:
+            end_time = time.time()
+            elapsed = end_time - start_time
+            log_print(f"[INFO] 結束時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", log_enable)
+            log_print(f"[INFO] 總運行時間: {elapsed:.2f} 秒", log_enable)
             await browser.close()
     save_results(results, log_enable)
 
