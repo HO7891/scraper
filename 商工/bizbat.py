@@ -5,7 +5,6 @@ import csv
 import os
 from datetime import datetime
 import sys
-import argparse
 
 BASE_URL = "https://findbiz.nat.gov.tw/fts/query/QueryBar/queryInit.do"
 OUTPUT_DIR = "./output_biz"
@@ -16,7 +15,6 @@ CSV_HEADERS = [
 SELECTORS = {
     "search_input": "#qryCond",
     "search_button": "#qryBtn",
-    "first_result_link": "#vParagraph > div > div.panel-heading > a",
     # 其餘欄位將用標題自動判斷
 }
 
@@ -41,7 +39,10 @@ async def extract_field_by_title(page, field_keyword):
         title = await tds.nth(0).inner_text()
         if field_keyword in title:
             value = await tds.nth(1).inner_text()
-            return value.strip()
+            value = value.strip()
+            if not value:  # 空字串或全空白
+                return "查無資料"
+            return value
     return "查無資料"
 
 async def extract_all_fields(page, field_keywords):
@@ -74,7 +75,7 @@ def fix_cmd_encoding():
     except Exception:
         pass
 
-def read_company_list(input_file, log_enable=False, logfile_path=None):
+def read_company_list(input_file, log_enable=False):
     if not os.path.exists(input_file):
         print(f"[ERROR] Input file not found: {input_file}")
         return []
@@ -83,7 +84,7 @@ def read_company_list(input_file, log_enable=False, logfile_path=None):
     log_print(f"[INFO] 讀取公司列表完成，共 {len(company_list)} 筆", log_enable)
     return company_list
 
-def save_results(data, log_enable=False, logfile_path=None):
+def save_results(data, log_enable=False):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = os.path.join(OUTPUT_DIR, f"biz_company_info_{timestamp}")
@@ -96,7 +97,7 @@ def save_results(data, log_enable=False, logfile_path=None):
             writer.writerows(data)
     log_print(f"[SUCCESS] Data saved to {base}.json & {base}.csv", log_enable)
 
-async def scrape_company_info(query_name, page, log_enable=False, logfile_path=None):
+async def scrape_company_info(query_name, page, log_enable=False):
     await page.goto(BASE_URL)
     try:
         await page.fill(SELECTORS["search_input"], query_name)
@@ -140,7 +141,10 @@ async def scrape_company_info(query_name, page, log_enable=False, logfile_path=N
             "company_address": "公司所在地",
         }
         for k, v in mapping.items():
-            result[v] = fields.get(k, "查無資料")
+            val = fields.get(k, "查無資料")
+            if not val or (isinstance(val, str) and val.strip() == ""):
+                val = "查無資料"
+            result[v] = val
         return result
 
     except Exception as e:
